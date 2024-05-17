@@ -164,12 +164,15 @@ class HanaDB(VectorStore):
                     try:
                         self.connection.setautocommit(False)
                         cur = self.connection.cursor()
+                        cur.execute('SET TRANSACTION AUTOCOMMIT DDL OFF')
                         cur.execute(sql_str_alter)
                         cur.execute(sql_str_update)
                         self.connection.commit()
                     except:
                         self.connection.rollback()
+                        print('Could not alter and update the table. Most probably a value could not be casted.')
                     finally:
+                        cur.execute('SET TRANSACTION AUTOCOMMIT DDL ON')
                         cur.close()
                         self.connection.setautocommit(True)
 
@@ -455,6 +458,7 @@ class HanaDB(VectorStore):
         embedding = HanaDB._sanitize_list_float(embedding)
         distance_func_name = HANA_DISTANCE_FUNCTION[self.distance_strategy][0]
         embedding_as_str = ",".join(map(str, embedding))
+        # Todo: add data_columns which are used for filtering and which are not in metadata
         sql_str = (
             f"SELECT TOP {k}"
             f'  "{self.content_column}", '  # row[0]
@@ -557,7 +561,7 @@ class HanaDB(VectorStore):
 
                 if isinstance(filter_value, bool):
                     query_tuple.append("true" if filter_value else "false")
-                elif isinstance(filter_value, int) or isinstance(filter_value, str):
+                elif isinstance(filter_value, int) or isinstance(filter_value, str) or isinstance(filter_value, float):
                     query_tuple.append(filter_value)
                 elif isinstance(filter_value, Dict):
                     # Handling of 'special' operators starting with "$"
