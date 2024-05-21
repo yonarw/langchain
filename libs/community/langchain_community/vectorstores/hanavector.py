@@ -1,4 +1,5 @@
 """SAP HANA Cloud Vector Engine"""
+
 from __future__ import annotations
 
 import importlib.util
@@ -56,7 +57,12 @@ LIKE_OPERATOR = "$like"
 LOGICAL_OPERATORS_TO_SQL = {"$and": "AND", "$or": "OR"}
 
 
-SUPPORTED_SQL_DATATYPES = {"NVARCHAR": "NVARCHAR(5000)", "INT": "INTEGER", "INTEGER": "INTEGER", "DOUBLE": "DOUBLE"}
+SUPPORTED_SQL_DATATYPES = {
+    "NVARCHAR": "NVARCHAR(5000)",
+    "INT": "INTEGER",
+    "INTEGER": "INTEGER",
+    "DOUBLE": "DOUBLE",
+}
 
 default_distance_strategy = DistanceStrategy.COSINE
 default_table_name: str = "EMBEDDINGS"
@@ -118,17 +124,19 @@ class HanaDB(VectorStore):
 
         # Check if the table exists, and eventually create it
         if not self._table_exists(self.table_name):
-            # if data_columns are configured, generate a DDL for that column. The string is suffixed with , when not empty
-            data_columns_sql_str = ''
+            # If data_columns are configured, generate a DDL for that column.
+            # The string is suffixed with , when not empty
+            data_columns_sql_str = ""
             if self.data_columns:
                 for key in self.data_columns:
-                    if not self.data_columns[key].upper() in SUPPORTED_SQL_DATATYPES.keys():
-                        raise ValueError(f"Unsupported SQL datatype: {self.data_columns[key]}. Use {[str(key) for key in SUPPORTED_SQL_DATATYPES.keys()]}")
-                    else:
-                        data_columns_sql_str += f'''"{HanaDB._sanitize_name(key)}" {SUPPORTED_SQL_DATATYPES[self.data_columns[key]]}, '''
+                    self._validate_data_type(key)
+                    data_columns_sql_str += (
+                        f'"{HanaDB._sanitize_name(key)}" '
+                        + f"{SUPPORTED_SQL_DATATYPES[self.data_columns[key]]}, "
+                    )
             sql_str = (
                 f'CREATE TABLE "{self.table_name}"('
-                f'{data_columns_sql_str}' # "col1" INT, "col2" DOUBLE,
+                f"{data_columns_sql_str}"  # "col1" INT, "col2" DOUBLE,
                 f'"{self.content_column}" NCLOB, '
                 f'"{self.metadata_column}" NCLOB, '
                 f'"{self.vector_column}" REAL_VECTOR '
@@ -147,34 +155,45 @@ class HanaDB(VectorStore):
         # The table does exist. Check if data columns need to be added.
         else:
             if self.data_columns and not self.read_only:
-                existing_data_columns = HanaDB._get_data_columns(self, self.table_name, self.content_column, self.metadata_column, self.vector_column)
-                new_data_columns = list(self.data_columns.keys() - existing_data_columns.keys())
+                existing_data_columns = HanaDB._get_data_columns(
+                    self,
+                    self.table_name,
+                    self.content_column,
+                    self.metadata_column,
+                    self.vector_column,
+                )
+                new_data_columns = list(
+                    self.data_columns.keys() - existing_data_columns.keys()
+                )
                 if len(new_data_columns) > 0:
-                    sql_str_alter = f'ALTER TABLE {self.table_name} ADD ( '
-                    sql_str_update = f'UPDATE {self.table_name} SET '
+                    sql_str_alter = f"ALTER TABLE {self.table_name} ADD ( "
+                    sql_str_update = f"UPDATE {self.table_name} SET "
                     for key in new_data_columns:
-                        if not self.data_columns[key].upper() in SUPPORTED_SQL_DATATYPES.keys():
-                            raise ValueError(f"Unsupported SQL datatype: {self.data_columns[key]}. Use {[str(key) for key in SUPPORTED_SQL_DATATYPES.keys()]}")
-                        else:
-                            sanitized_name = HanaDB._sanitize_name(key)
-                            sql_str_alter += f' "{sanitized_name}" {SUPPORTED_SQL_DATATYPES[self.data_columns[key]]},'
-                            sql_str_update += f''' "{sanitized_name}" = JSON_VALUE({self.metadata_column}, '$.{sanitized_name}'),'''
-                    sql_str_alter = sql_str_alter[0:-1] + ')'
+                        self._validate_data_type(key)
+                        sanitized_name = HanaDB._sanitize_name(key)
+                        sql_str_alter += f' "{sanitized_name}" ' \
+                        f'{SUPPORTED_SQL_DATATYPES[self.data_columns[key]]},'
+                        sql_str_update += f"\"{sanitized_name}\" = " \
+                            f"JSON_VALUE({self.metadata_column}, " \
+                            f"'$.{sanitized_name}'),"
+                    sql_str_alter = sql_str_alter[0:-1] + ")"
                     sql_str_update = sql_str_update[0:-1]
                     try:
                         self.connection.setautocommit(False)
                         cur = self.connection.cursor()
-                        cur.execute('SET TRANSACTION AUTOCOMMIT DDL OFF')
+                        cur.execute("SET TRANSACTION AUTOCOMMIT DDL OFF")
                         cur.execute(sql_str_alter)
                         cur.execute(sql_str_update)
                         self.connection.commit()
-                    except:
-                        self.connection.rollback()
-                        print('Could not alter and update the table. Most probably a value could not be casted.')
                     finally:
-                        cur.execute('SET TRANSACTION AUTOCOMMIT DDL ON')
+                        self.connection.rollback()
+                        cur.execute("SET TRANSACTION AUTOCOMMIT DDL ON")
                         cur.close()
                         self.connection.setautocommit(True)
+                        raise Warning(
+                            "Could not alter and update the table. "
+                            "Most probably a value could not be casted."
+                        )
 
         # Check if the needed columns exist and have the correct type
         self._check_column(self.table_name, self.content_column, ["NCLOB", "NVARCHAR"])
@@ -185,14 +204,22 @@ class HanaDB(VectorStore):
             ["REAL_VECTOR"],
             self.vector_column_length,
         )
-        # MF: and get the additional data columns from the table. this could be merged with the check columns above
-        self.data_columns = HanaDB._get_data_columns(self, self.table_name, self.content_column, self.metadata_column, self.vector_column)
+        # And get the additional data columns from the table.
+        self.data_columns = HanaDB._get_data_columns(
+            self,
+            self.table_name,
+            self.content_column,
+            self.metadata_column,
+            self.vector_column,
+        )
 
     def _table_exists(self, table_name) -> bool:  # type: ignore[no-untyped-def]
         sql_str = (
             "SELECT COUNT(*) FROM ("
-            "SELECT TABLE_NAME AS ENT FROM SYS.TABLES WHERE SCHEMA_NAME = CURRENT_SCHEMA AND TABLE_NAME = ? UNION "
-            "SELECT VIEW_NAME AS ENT FROM SYS.VIEWS WHERE SCHEMA_NAME = CURRENT_SCHEMA AND VIEW_NAME = ?)"
+            "SELECT TABLE_NAME AS ENT FROM SYS.TABLES "
+            "WHERE SCHEMA_NAME = CURRENT_SCHEMA AND TABLE_NAME = ? UNION "
+            "SELECT VIEW_NAME AS ENT FROM SYS.VIEWS "
+            "WHERE SCHEMA_NAME = CURRENT_SCHEMA AND VIEW_NAME = ?)"
         )
         try:
             cur = self.connection.cursor()
@@ -205,11 +232,15 @@ class HanaDB(VectorStore):
             cur.close()
         return False
 
-    def _check_column(self, table_name, column_name, column_type, column_length=None):  # type: ignore[no-untyped-def]
+    def _check_column(
+            self, table_name, column_name, column_type, column_length=None
+    ):  # type: ignore[no-untyped-def]
         sql_str = (
             "SELECT DATA_TYPE_NAME, LENGTH FROM ("
-            "SELECT DATA_TYPE_NAME, LENGTH, COLUMN_NAME, TABLE_NAME AS NAME, SCHEMA_NAME FROM SYS.TABLE_COLUMNS UNION "
-            "SELECT DATA_TYPE_NAME, LENGTH, COLUMN_NAME, VIEW_NAME AS NAME, SCHEMA_NAME FROM SYS.VIEW_COLUMNS)"
+            "SELECT DATA_TYPE_NAME, LENGTH, COLUMN_NAME, "
+            "TABLE_NAME AS NAME, SCHEMA_NAME FROM SYS.TABLE_COLUMNS UNION "
+            "SELECT DATA_TYPE_NAME, LENGTH, COLUMN_NAME, "
+            "VIEW_NAME AS NAME, SCHEMA_NAME FROM SYS.VIEW_COLUMNS)"
             "WHERE SCHEMA_NAME = CURRENT_SCHEMA AND NAME = ? AND COLUMN_NAME = ?"
         )
         try:
@@ -225,7 +256,8 @@ class HanaDB(VectorStore):
                         f"Column {column_name} has the wrong type: {rows[0][0]}"
                     )
                 # Check length, if parameter was provided
-                # column_length is always set to default None, so it is always checked, even if a table/view was reused
+                # column_length is always set to default None,
+                # so it is always checked, even if a table/view was reused
                 if column_length is not None:
                     if rows[0][1] != column_length:
                         raise AttributeError(
@@ -238,7 +270,8 @@ class HanaDB(VectorStore):
 
     def _is_dbobject_readonly(self, table_name) -> bool:
         sql_str = (
-            "SELECT COUNT(*) FROM SYS.TABLES WHERE SCHEMA_NAME = CURRENT_SCHEMA AND TABLE_NAME = ?"
+            "SELECT COUNT(*) FROM SYS.TABLES "
+            "WHERE SCHEMA_NAME = CURRENT_SCHEMA AND TABLE_NAME = ?"
         )
         try:
             cur = self.connection.cursor()
@@ -251,17 +284,30 @@ class HanaDB(VectorStore):
             cur.close()
         return True
 
-    def _get_data_columns(self, table_name, content_column, metadata_column, vector_column) -> dict: # type: ignore[no-untyped-def]
+    def _get_data_columns(
+        self, table_name, content_column, metadata_column, vector_column
+    ) -> dict:  # type: ignore[no-untyped-def]
         sql_str = (
             "SELECT COLUMN_NAME, DATA_TYPE_NAME, LENGTH FROM ("
-            "SELECT COLUMN_NAME, DATA_TYPE_NAME, LENGTH, TABLE_NAME AS NAME, SCHEMA_NAME FROM SYS.TABLE_COLUMNS UNION "
-            "SELECT COLUMN_NAME, DATA_TYPE_NAME, LENGTH, VIEW_NAME AS NAME, SCHEMA_NAME FROM SYS.VIEW_COLUMNS "
-            ") WHERE SCHEMA_NAME = CURRENT_SCHEMA AND NAME = ? AND COLUMN_NAME NOT IN (?, ?, ?)"
+            "SELECT COLUMN_NAME, DATA_TYPE_NAME, LENGTH, "
+            "    TABLE_NAME AS NAME, SCHEMA_NAME FROM SYS.TABLE_COLUMNS UNION "
+            "SELECT COLUMN_NAME, DATA_TYPE_NAME, LENGTH, "
+            "    VIEW_NAME AS NAME, SCHEMA_NAME FROM SYS.VIEW_COLUMNS "
+            ") WHERE SCHEMA_NAME = CURRENT_SCHEMA AND NAME = ? "
+            "        AND COLUMN_NAME NOT IN (?, ?, ?)"
         )
         data_columns = {}
         try:
             cur = self.connection.cursor()
-            cur.execute(sql_str, (table_name, content_column, metadata_column, vector_column))
+            cur.execute(
+                sql_str,
+                (
+                    table_name,
+                    content_column,
+                    metadata_column,
+                    vector_column
+                )
+            )
             if cur.has_result_set():
                 rows = cur.fetchall()
                 if len(rows) > 0:
@@ -270,6 +316,14 @@ class HanaDB(VectorStore):
         finally:
             cur.close()
         return data_columns
+
+    def _validate_data_type(self, key):
+        if self.data_columns[key].upper() not in SUPPORTED_SQL_DATATYPES.keys():
+            raise ValueError(
+                f"Unsupported SQL datatype: "
+                f"{self.data_columns[key]}. Use "
+                f"{[str(key) + ' ' for key in SUPPORTED_SQL_DATATYPES.keys()]}"
+            )
 
     @property
     def embeddings(self) -> Embeddings:
@@ -322,7 +376,10 @@ class HanaDB(VectorStore):
         """
         # If the vectorstore is based on a view, we can't insert
         if self.read_only:
-            raise Warning('The database object that contains the data is read only. Most probably it is a view.')
+            raise Warning(
+                "The database object that contains the data is read only. "
+                "Most probably it is a view."
+            )
 
         # Create all embeddings of the texts beforehand to improve performance
         if embeddings is None:
@@ -334,12 +391,21 @@ class HanaDB(VectorStore):
             for i, text in enumerate(texts):
                 # Use provided values by default or fallback
                 metadata = metadatas[i] if metadatas else {}
-                # Get the string of all column names, add the right number of placeholders, copy values from metadata if exists
-                col_str = ',' + '","'.join(self.data_columns.keys()).join(('"','"')) if len(self.data_columns) > 0 else ''
-                param_str = ',?' * len(self.data_columns)
+                # Get the string of all column names, add the right number of
+                # placeholders, copy values from metadata if exists
+                col_str = (
+                    "," + '","'.join(self.data_columns.keys()).join(('"', '"'))
+                    if len(self.data_columns) > 0
+                    else ""
+                )
+                param_str = ",?" * len(self.data_columns)
                 data_values = []
                 for data_column in self.data_columns:
-                    data_values.append(metadata[data_column] if data_column in metadata.keys() else None)
+                    data_values.append(
+                        metadata[data_column]
+                        if data_column in metadata.keys()
+                        else None
+                    )
                 embedding = (
                     embeddings[i]
                     if embeddings
@@ -355,8 +421,9 @@ class HanaDB(VectorStore):
                     (
                         text,
                         json.dumps(HanaDB._sanitize_metadata_keys(metadata)),
-                        f"[{','.join(map(str, embedding))}]"
-                    ) + tuple(data_values)
+                        f"[{','.join(map(str, embedding))}]",
+                    )
+                    + tuple(data_values),
                 )
         finally:
             cur.close()
@@ -458,7 +525,8 @@ class HanaDB(VectorStore):
         embedding = HanaDB._sanitize_list_float(embedding)
         distance_func_name = HANA_DISTANCE_FUNCTION[self.distance_strategy][0]
         embedding_as_str = ",".join(map(str, embedding))
-        # Todo: add data_columns which are used for filtering and which are not in metadata
+        # Todo: add data_columns which are used for filtering and
+        # which are not in metadata
         sql_str = (
             f"SELECT TOP {k}"
             f'  "{self.content_column}", '  # row[0]
@@ -561,7 +629,11 @@ class HanaDB(VectorStore):
 
                 if isinstance(filter_value, bool):
                     query_tuple.append("true" if filter_value else "false")
-                elif isinstance(filter_value, int) or isinstance(filter_value, str) or isinstance(filter_value, float):
+                elif (
+                    isinstance(filter_value, int)
+                    or isinstance(filter_value, str)
+                    or isinstance(filter_value, float)
+                ):
                     query_tuple.append(filter_value)
                 elif isinstance(filter_value, Dict):
                     # Handling of 'special' operators starting with "$"
@@ -614,14 +686,11 @@ class HanaDB(VectorStore):
                     )
                 # If the key is in data_column, we query a column
                 if key in self.data_columns:
-                    col_str = f''' "{key}" '''
+                    col_str = f""" "{key}" """
                 # Otherwise we extract the key from the JSON metadata column
                 else:
                     col_str = f" JSON_VALUE({self.metadata_column}, '$.{key}')"
-                where_str += (
-                    col_str +
-                    f" {operator} {sql_param}"
-                )
+                where_str += col_str + f" {operator} {sql_param}"
 
         return where_str, query_tuple
 
@@ -641,7 +710,10 @@ class HanaDB(VectorStore):
         """
         # If the vectorstore is based on a view, we can't insert
         if self.read_only:
-            raise Warning('The database object that contains the data is read only. Most probably it is a view.')
+            raise Warning(
+                "The database object that contains the data is read only. "
+                "Most probably it is a view."
+            )
 
         if ids is not None:
             raise ValueError("Deletion via ids is not supported")

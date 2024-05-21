@@ -30,16 +30,16 @@ TYPE_4B_FILTERING_TEST_CASES = [
 ]
 
 DATA_COLUMNS = [
-    None,   # Without data_colums we search within the json metadata
-    {       # With metadata search is done in the given data_colums
-            # Currently only INT, NVARCHAR and DOUBLE are supported
+    None,  # Without data_colums we search within the json metadata
+    {  # With metadata search is done in the given data_colums
+        # Currently only INT, NVARCHAR and DOUBLE are supported
         "id": "INT",
         "name": "NVARCHAR",
         "count": "INT",
         "height": "DOUBLE",
         "happiness": "DOUBLE",
-        "sadness": "DOUBLE"
-    }
+        "sadness": "DOUBLE",
+    },
 ]
 
 try:
@@ -971,7 +971,7 @@ def test_hanavector_enhanced_filter_1() -> None:
 
 
 def test_hanavector_with_metadata_filters(
-    table_name : str,
+    table_name: str,
     test_filter: Dict[str, Any],
     expected_ids: List[int],
     data_columns: Dict[str, str],
@@ -982,7 +982,7 @@ def test_hanavector_with_metadata_filters(
         connection=test_setup.conn,
         embedding=embedding,
         table_name=table_name,
-        data_columns=data_columns
+        data_columns=data_columns,
     )
 
     vectorDB.add_documents(DOCUMENTS)
@@ -991,6 +991,7 @@ def test_hanavector_with_metadata_filters(
     ids = [doc.metadata["id"] for doc in docs]
     assert len(ids) == len(expected_ids), test_filter
     assert set(ids).issubset(expected_ids), test_filter
+
 
 @pytest.mark.parametrize("test_filter, expected_ids", TYPE_1_FILTERING_TEST_CASES)
 @pytest.mark.parameterize("data_columns", DATA_COLUMNS)
@@ -1004,8 +1005,9 @@ def test_hanavector_with_metadata_filters_1(
         table_name="TEST_TABLE_ENHANCED_FILTER_1",
         test_filter=test_filter,
         expected_ids=expected_ids,
-        data_columns=data_columns
+        data_columns=data_columns,
     )
+
 
 @pytest.mark.parametrize("test_filter, expected_ids", TYPE_2_FILTERING_TEST_CASES)
 @pytest.mark.parameterize("data_columns", DATA_COLUMNS)
@@ -1019,8 +1021,9 @@ def test_hanavector_with_metadata_filters_2(
         table_name="TEST_TABLE_ENHANCED_FILTER_2",
         test_filter=test_filter,
         expected_ids=expected_ids,
-        data_columns=data_columns
+        data_columns=data_columns,
     )
+
 
 @pytest.mark.parametrize("test_filter, expected_ids", TYPE_3_FILTERING_TEST_CASES)
 @pytest.mark.parameterize("data_columns", DATA_COLUMNS)
@@ -1034,7 +1037,7 @@ def test_hanavector_with_metadata_filters_3(
         table_name="TEST_TABLE_ENHANCED_FILTER_3",
         test_filter=test_filter,
         expected_ids=expected_ids,
-        data_columns=data_columns
+        data_columns=data_columns,
     )
 
 
@@ -1042,7 +1045,7 @@ def test_hanavector_with_metadata_filters_3(
 @pytest.mark.parameterize("data_columns", DATA_COLUMNS)
 @pytest.mark.skipif(not hanadb_installed, reason="hanadb not installed")
 def test_hanavector_with_metadata_filters_4(
-   test_filter: Dict[str, Any],
+    test_filter: Dict[str, Any],
     expected_ids: List[int],
     data_columns: Dict[str, str],
 ) -> None:
@@ -1050,7 +1053,7 @@ def test_hanavector_with_metadata_filters_4(
         table_name="TEST_TABLE_ENHANCED_FILTER_4",
         test_filter=test_filter,
         expected_ids=expected_ids,
-        data_columns=data_columns
+        data_columns=data_columns,
     )
 
 
@@ -1066,7 +1069,7 @@ def test_hanavector_with_metadata_filters_4b(
         table_name="TEST_TABLE_ENHANCED_FILTER_4b",
         test_filter=test_filter,
         expected_ids=expected_ids,
-        data_columns=data_columns
+        data_columns=data_columns,
     )
 
 
@@ -1082,5 +1085,5 @@ def test_hanavector_with_metadata_filters_5(
         table_name="TEST_TABLE_ENHANCED_FILTER_5",
         test_filter=test_filter,
         expected_ids=expected_ids,
-        data_columns=data_columns
+        data_columns=data_columns,
     )
